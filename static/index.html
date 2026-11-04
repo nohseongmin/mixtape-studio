@@ -1,54 +1,53 @@
 <!doctype html>
-<html lang="ko">
+<html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#f5f4ef">
-  <title>Mixtape — 나만의 한 파일 플레이리스트</title>
+  <title>Mixtape — Your playlist. One file.</title>
   <link rel="icon" href="data:,">
   <link rel="stylesheet" href="/style.css">
   <script src="/app.js" defer></script>
 </head>
 <body>
   <div class="shell">
-    <header><a class="brand" href="/" aria-label="Mixtape 홈"><span class="brand-mark">m.</span> mixtape<span class="brand-dot">●</span></a><span class="local"><span></span> 내 컴퓨터에서 만드는 플레이리스트</span></header>
+    <header><a class="brand" href="/" aria-label="Mixtape home"><span class="brand-mark">m.</span> mixtape<span class="brand-dot">●</span></a><span class="local"><span></span> Made on your computer</span></header>
     <main>
       <section class="intro">
-        <div><p class="eyebrow">YOUR SONGS. ONE FILE.</p><h1>좋아하는 곡을,<br>하나의 파일로<span>.</span></h1><p class="intro-copy">링크를 모으고, 커버를 고르면 끝.<br>곡 사이 무음 없이 이어지는 나만의 MP3를 만드세요.</p></div>
+        <div><p class="eyebrow">YOUR SONGS. ONE FILE.</p><h1>All your favorites.<br>One MP3<span>.</span></h1><p class="intro-copy">Bring your links. Make it yours.<br>Turn your playlist into one seamless MP3.</p></div>
         <div class="tape" aria-hidden="true"><div class="tape-label"><span>MY PERSONAL MIX</span><strong>SIDE A <i>●</i></strong><div class="tape-window"><b></b><em></em><b></b></div><span>PLAY IT YOUR WAY. &nbsp; ↗</span></div><div class="tape-bottom"></div></div>
       </section>
       <div id="notice" class="notice" role="alert" hidden></div>
       <div class="workspace">
         <section class="panel tracks-panel">
-          <div class="section-heading"><div><span class="step">01</span><h2>음악 모으기</h2></div><span id="track-count" class="pill">0곡</span></div>
-          <label for="links" class="field-label">유튜브 영상 링크</label>
-          <textarea id="links" rows="5" placeholder="https://www.youtube.com/watch?v=…&#10;https://youtu.be/…&#10;&#10;한 줄에 하나씩, 원하는 순서대로 붙여넣으세요." spellcheck="false"></textarea>
-          <div class="input-footer"><span>개별 영상 링크 여러 개 · 전체 길이 그대로</span><button id="analyze" class="button dark" type="button">목록 확인 <span>↗</span></button></div>
-          <div class="list-heading"><h3>트랙 리스트</h3><span>위에서 아래 순서로 재생</span></div>
-          <div id="empty-list" class="empty"><div class="empty-lines"><span></span><span></span><span></span></div><p>어떤 음악으로 채워볼까요?</p><span>링크를 확인하면 제목과 재생시간이 표시돼요.</span></div>
-          <ol id="track-list" class="track-list" aria-label="합칠 곡 목록"></ol>
-          <div class="duration-box"><div><span>예상 재생시간</span><strong id="expected">00:00:00</strong></div><span id="duration-note">영상 길이의 합계 · 앞뒤 무음 제거 후 조금 짧아져요.</span></div>
-          <div class="silence-note"><span class="check">✓</span><p><strong>곡 사이 무음은 자동으로 정리해요</strong><br>각 곡의 시작과 끝만 다듬고, 곡 중간의 쉼은 유지해요.</p></div>
+          <div class="section-heading"><div><span class="step">01</span><h2>Gather your tracks</h2></div><span id="track-count" class="pill">0 tracks</span></div>
+          <div class="list-heading"><h3>YouTube video links</h3><span>Plays from top to bottom</span></div>
+          <p class="link-help">Titles and durations appear automatically.<br>You can paste multiple links at once.</p>
+          <div id="links"><ol id="track-list" class="track-list" aria-label="Tracks to combine"></ol></div>
+          <div class="input-footer"><button id="add-link" class="button outline" type="button">＋ Add link</button></div>
+          <div class="duration-box"><div><span>Estimated duration</span><strong id="expected">00:00:00</strong></div><span id="duration-note">Total video duration · slightly shorter after trimming edge silence.</span></div>
+          <div class="silence-note"><span class="check">✓</span><p><strong>Silence between tracks, taken care of</strong><br>Only the beginning and end are trimmed. Pauses within tracks stay.</p></div>
         </section>
         <section class="panel details-panel">
-          <div class="section-heading"><div><span class="step">02</span><h2>내 믹스 꾸미기</h2></div><span class="small-label">ID3 TAGS</span></div>
-          <div class="cover-area"><button id="choose-cover" class="cover-button" type="button" aria-label="앨범 커버 이미지 선택"><span id="default-cover"><span class="record"></span><span class="cover-caption">YOUR MIX<br>YOUR COVER</span><span class="cover-plus">+</span></span><img id="cover-preview" alt="적용한 정사각형 앨범 커버" hidden></button><div class="cover-copy"><strong>이 믹스의 얼굴</strong><p>사진을 넣고 원하는 부분을<br>정사각형으로 잘라보세요.</p><button id="edit-cover" class="text-button" type="button" disabled>자르기 수정</button><button id="remove-cover" class="text-button muted" type="button" hidden>제거</button></div></div>
+          <div class="section-heading"><div><span class="step">02</span><h2>Make it yours</h2></div><span class="small-label">ID3 TAGS</span></div>
+          <div class="cover-area"><button id="choose-cover" class="cover-button" type="button" aria-label="Choose an album cover"><span id="default-cover"><span class="record"></span><span class="cover-caption">YOUR MIX<br>YOUR COVER</span><span class="cover-plus">+</span></span><img id="cover-preview" alt="Your square album cover" hidden></button><div class="cover-copy"><strong>A face for your mix</strong><p>Pick a photo and crop<br>your favorite part to a square.</p><button id="edit-cover" class="text-button" type="button" disabled>Edit crop</button><button id="remove-cover" class="text-button muted" type="button" hidden>Remove</button></div></div>
           <input id="cover-file" type="file" accept="image/*" hidden>
-          <div class="fields"><label>제목 <span>필수</span><input id="title" type="text" placeholder="예: 새벽 산책에 어울리는 노래" required></label><label>가수<input id="artist" type="text" placeholder="예: Various Artists"></label><label>앨범<input id="album" type="text" placeholder="예: My Mixtape Vol. 1"></label></div>
-          <div class="output-format"><span>완성 파일</span><strong>MP3 <span>·</span> <span id="bitrate-label">192 kbps</span></strong></div>
-          <button id="render" class="button primary" type="button" disabled>하나의 MP3 만들기 <span>→</span></button>
-          <p class="save-note">완성 파일은 이 컴퓨터에 저장돼요.<br>표지는 선택사항이에요.</p>
+          <div class="fields"><label>Title <span>required</span><input id="title" type="text" placeholder="e.g. Songs for a midnight walk" required></label><label>Artist<input id="artist" type="text" placeholder="e.g. Various Artists"></label><label>Album<input id="album" type="text" placeholder="e.g. My Mixtape Vol. 1"></label></div>
+          <div class="output-format"><label for="bitrate">MP3 quality</label><select id="bitrate" aria-describedby="bitrate-help" disabled></select></div>
+          <p id="bitrate-help" class="save-note">Higher bitrates make larger files. They cannot improve the original audio quality.</p>
+          <button id="render" class="button primary" type="button" disabled>Create one MP3 <span>→</span></button>
+          <p class="save-note">Your finished file stays on this computer.<br>Cover art is optional.</p>
         </section>
       </div>
       <section id="progress-panel" class="panel progress-panel" hidden aria-live="polite">
-        <div class="progress-heading"><div><p class="eyebrow" id="progress-eyebrow">MAKING YOUR MIX</p><h2 id="progress-title">작업 준비 중</h2></div><button id="cancel" class="button outline" type="button">작업 취소</button></div>
-        <progress id="progress" max="100" value="0" aria-label="전체 작업 진행률"></progress>
-        <p id="progress-detail">영상을 순서대로 처리하고 있어요.</p>
-        <div id="result" hidden><div class="result-info"><strong id="result-duration"></strong><span id="result-summary"></span></div><audio id="player" controls preload="none"></audio><a id="download" class="button primary" download>MP3 저장하기 ↓</a></div>
+        <div class="progress-heading"><div><p class="eyebrow" id="progress-eyebrow">MAKING YOUR MIX</p><h2 id="progress-title">Getting ready</h2></div><button id="cancel" class="button outline" type="button">Cancel task</button></div>
+        <progress id="progress" max="100" value="0" aria-label="Overall progress"></progress>
+        <p id="progress-detail">Processing your videos in order.</p>
+        <div id="result" hidden><div class="result-info"><strong id="result-duration"></strong><span id="result-summary"></span></div><audio id="player" controls preload="none"></audio><a id="download" class="button primary" download>Save MP3 ↓</a></div>
       </section>
     </main>
-    <footer><span>mixtape / made for your everyday listening</span><span>여러 곡, 하나의 흐름.</span></footer>
+    <footer><span>mixtape / made for your everyday listening</span><span>Many tracks. One flow.</span></footer>
   </div>
-  <dialog id="crop-dialog" aria-labelledby="crop-title"><div class="crop-header"><div><p class="eyebrow">MAKE IT YOURS</p><h2 id="crop-title">커버로 쓸 부분을 골라주세요</h2></div><button id="close-crop" type="button" class="icon-button" aria-label="편집 취소">×</button></div><p class="crop-help">이미지를 드래그하거나 아래 슬라이더로 위치를 조절하세요.</p><canvas id="crop-canvas" width="400" height="400" aria-label="정사각형 자르기 미리보기"></canvas><div class="crop-sliders"><label>확대<input id="zoom" type="range" min="1" max="4" step="0.01" value="1"></label><label>가로 위치<input id="crop-x" type="range" min="0" max="1" step="0.001" value="0.5"></label><label>세로 위치<input id="crop-y" type="range" min="0" max="1" step="0.001" value="0.5"></label></div><div class="crop-actions"><button id="reset-crop" class="button outline" type="button">가운데로 초기화</button><button id="apply-crop" class="button primary" type="button">이 부분 사용하기 ✓</button></div></dialog>
+  <dialog id="crop-dialog" aria-labelledby="crop-title"><div class="crop-header"><div><p class="eyebrow">MAKE IT YOURS</p><h2 id="crop-title">Choose your cover crop</h2></div><button id="close-crop" type="button" class="icon-button" aria-label="Cancel editing">×</button></div><p class="crop-help">Drag the image or use the sliders to adjust the crop.</p><canvas id="crop-canvas" width="400" height="400" aria-label="Square crop preview"></canvas><div class="crop-sliders"><label>Zoom<input id="zoom" type="range" min="1" max="4" step="0.01" value="1"></label><label>Horizontal position<input id="crop-x" type="range" min="0" max="1" step="0.001" value="0.5"></label><label>Vertical position<input id="crop-y" type="range" min="0" max="1" step="0.001" value="0.5"></label></div><div class="crop-actions"><button id="reset-crop" class="button outline" type="button">Reset to center</button><button id="apply-crop" class="button primary" type="button">Use this crop ✓</button></div></dialog>
 </body>
 </html>

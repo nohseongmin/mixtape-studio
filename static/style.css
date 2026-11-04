@@ -388,6 +388,24 @@ textarea::placeholder {
   flex:1;
   min-width:0
 }
+.link-help {
+  color:var(--muted);
+  font-size:12px;
+  line-height:1.7;
+  margin:0 0 12px
+}
+.track-link {
+  display:block;
+  width:100%;
+  min-width:0;
+  padding:10px;
+  border:1px solid var(--line);
+  border-radius:7px;
+  background:#fafbf8;
+  color:var(--ink);
+  font-size:12px;
+  margin-bottom:8px
+}
 .track-copy strong {
   display:block;
   font-size:12px;
@@ -609,21 +627,22 @@ textarea::placeholder {
 .output-format {
   display:flex;
   justify-content:space-between;
+  align-items:center;
   padding:20px 0 16px;
   margin-top:11px;
   border-top:1px solid var(--line);
   font-size:11px;
   color:#818876
 }
-.output-format strong {
-  font-size:10px;
-  font-weight:600;
-  color:#5b6450
+#bitrate {
+  font:inherit;
+  color:var(--ink);
+  background:white;
+  padding:8px 12px;
+  border:1px solid var(--line);
+  border-radius:7px
 }
-.output-format strong>span:first-child {
-  color:#bbc0b3;
-  margin:0 4px
-}
+#bitrate-help { margin:0 0 12px }
 #render {
   width:100%;
   justify-content:space-between;

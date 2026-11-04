@@ -1,8 +1,8 @@
 "use strict";
 const $ = (id) => document.getElementById(id);
-const state = { config: null, analysisId: null, tracks: [], busy: false, jobId: null, cover: null, image: null, editingImage: null, crop: null, pollTimer: null };
+const state = { config: null, analysisId: null, tracks: [], busy: false, jobId: null, cover: null, image: null, editingImage: null, crop: null, pollTimer: null, analysisTimer: null };
 const POLL_MS = 850;
-const STORAGE_KEY = "mixtape-draft-v1";
+const AUTO_ANALYZE_MS = 700;
 
 function duration(seconds) {
   const total = Math.max(0, Math.round(seconds || 0));
@@ -21,28 +21,19 @@ async function api(path, data) {
       method: "POST", headers: { "Content-Type": "application/json", "X-Mixtape-Request": "1" }, body: JSON.stringify(data),
     });
   } catch (error) {
-    throw new Error("앱에 연결할 수 없어요. 실행 창이 열려 있는지 확인하고 페이지를 새로고침하세요.", { cause: error });
+    throw new Error("Unable to connect. Close Mixtape and open it again.", { cause: error });
   }
   const result = await response.json();
-  if (!response.ok) throw new Error(typeof result.detail === "string" ? result.detail : "요청을 처리하지 못했어요.");
+  if (!response.ok) throw new Error(typeof result.detail === "string" ? result.detail : "Unable to process the request.");
   return result;
 }
 
-function saveDraft() {
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify({
-      links: $("links").value, title: $("title").value, artist: $("artist").value, album: $("album").value,
-      analysisId: state.analysisId, tracks: state.tracks, jobId: state.jobId, cover: state.cover,
-    }));
-  } catch (error) {
-    notify("브라우저에 임시 저장하지 못했어요. 새로고침하면 입력 내용이 사라질 수 있어요.");
-  }
-}
-
 function controls() {
-  $("analyze").disabled = state.busy || !state.config || !$("links").value.trim();
-  $("render").disabled = state.busy || !state.config || !!state.config.missing.length || !state.analysisId || !state.tracks.length || state.tracks.some((track) => track.error) || !$("title").value.trim();
-  for (const id of ["links", "title", "artist", "album", "choose-cover", "remove-cover"]) $(id).disabled = state.busy;
+  const tracks = state.tracks.filter((track) => track.input.trim());
+  const unchecked = tracks.filter((track) => !track.id || track.pending || track.error).length;
+  $("render").disabled = state.busy || !state.config || !!state.config.missing.length || !state.analysisId || !tracks.length || !!unchecked || !$("title").value.trim();
+  for (const id of ["add-link", "title", "artist", "album", "choose-cover", "remove-cover", "bitrate"]) $(id).disabled = state.busy;
+  document.querySelectorAll(".track-link").forEach((input) => { input.disabled = state.busy; });
   $("edit-cover").disabled = state.busy || !state.image;
   document.querySelectorAll(".track-actions button").forEach((button) => { button.disabled = state.busy || button.dataset.edge === "true"; });
 }
@@ -58,28 +49,72 @@ function renderTracks() {
     const copy = document.createElement("div");
     copy.className = "track-copy";
     const title = document.createElement("strong");
-    title.textContent = track.title;
-    title.title = track.title;
+    title.textContent = track.title || "Add a video link";
+    title.title = track.title || "";
     const detail = document.createElement("small");
-    detail.textContent = track.error || "YouTube · 전체 오디오";
-    copy.append(title, detail);
+    detail.textContent = track.error || (track.pending ? "Checking video details…" : "");
+    detail.hidden = !detail.textContent;
+    const input = document.createElement("input");
+    input.type = "text";
+    input.className = "track-link";
+    input.value = track.input;
+    input.placeholder = "https://youtu.be/…";
+    input.spellcheck = false;
+    input.autocomplete = "off";
+    input.maxLength = state.config.links_max_chars;
+    input.setAttribute("aria-label", `Video link ${index + 1}`);
+    input.addEventListener("input", () => {
+      state.tracks[index] = { input: input.value };
+      title.textContent = input.value.trim() ? "New link · waiting to check" : "Add a video link";
+      detail.textContent = "";
+      detail.hidden = true;
+      time.textContent = "—";
+      row.classList.remove("error");
+      updateTotal(); controls(); scheduleAnalysis();
+    });
+    input.addEventListener("paste", (event) => {
+      const links = event.clipboardData.getData("text").trim().split(/\s+/).filter(Boolean);
+      if (links.length < 2) return;
+      event.preventDefault();
+      const length = state.tracks.reduce((sum, item, i) => sum + (i === index ? 0 : item.input.length + 1), 0) + links.join("\n").length;
+      if (length > state.config.links_max_chars) { notify("Too many link characters. Split the list into smaller batches."); return; }
+      state.tracks.splice(index, 1, ...links.map((link) => ({ input: link })));
+      renderTracks(); scheduleAnalysis();
+    });
+    copy.append(input, title, detail);
     const time = document.createElement("span");
     time.className = "track-time";
-    time.textContent = track.error ? "—" : duration(track.duration).replace(/^00:/, "");
+    time.textContent = track.error || !track.duration ? "—" : duration(track.duration).replace(/^00:/, "");
     const actions = document.createElement("div");
     actions.className = "track-actions";
-    [["↑", "위로 이동", -1], ["↓", "아래로 이동", 1], ["×", "목록에서 제거", 0]].forEach(([symbol, label, offset]) => {
+    if (track.error || (track.pending && !state.busy)) {
+      const retry = document.createElement("button");
+      retry.type = "button";
+      retry.className = "icon-button";
+      retry.textContent = "↻";
+      retry.title = "Retry";
+      retry.setAttribute("aria-label", `Retry track ${index + 1}`);
+      retry.addEventListener("click", () => {
+        state.tracks[index] = { input: track.input };
+        renderTracks(); scheduleAnalysis();
+      });
+      actions.append(retry);
+    }
+    [["↑", "Move up", -1], ["↓", "Move down", 1], ["×", "Remove", 0]].forEach(([symbol, label, offset]) => {
       const button = document.createElement("button");
       button.type = "button";
       button.className = "icon-button";
       button.textContent = symbol;
-      button.setAttribute("aria-label", `${index + 1}번째 곡 ${label}`);
+      button.setAttribute("aria-label", `${label} track ${index + 1}`);
       button.title = label;
       button.dataset.edge = String(offset !== 0 && (index + offset < 0 || index + offset >= state.tracks.length));
       button.addEventListener("click", () => {
-        if (offset === 0) state.tracks.splice(index, 1);
+        if (offset === 0) {
+          state.tracks.splice(index, 1);
+          if (!state.tracks.length) state.tracks.push({ input: "" });
+        }
         else [state.tracks[index], state.tracks[index + offset]] = [state.tracks[index + offset], state.tracks[index]];
-        renderTracks(); saveDraft();
+        renderTracks();
       });
       actions.append(button);
     });
@@ -87,13 +122,17 @@ function renderTracks() {
     fragment.append(row);
   });
   $("track-list").replaceChildren(fragment);
-  $("empty-list").hidden = !!state.tracks.length;
-  $("track-count").textContent = `${state.tracks.length}곡`;
-  $("expected").textContent = duration(state.tracks.reduce((sum, track) => sum + track.duration, 0));
-  $("duration-note").textContent = state.tracks.some((track) => track.error)
-    ? "확인된 영상만 합산했어요. 오류가 있는 곡은 제거하거나 다시 확인해주세요."
-    : "영상 길이의 합계 · 앞뒤 무음 제거 후 조금 짧아져요.";
+  updateTotal();
   controls();
+}
+
+function updateTotal() {
+  const tracks = state.tracks.filter((track) => track.input.trim());
+  $("track-count").textContent = `${tracks.length} tracks`;
+  $("expected").textContent = duration(tracks.reduce((sum, track) => sum + (track.duration || 0), 0));
+  $("duration-note").textContent = tracks.some((track) => track.error || track.pending || !track.id)
+    ? "Checked tracks only. The total updates as new links are checked."
+    : "Total video duration · slightly shorter after trimming edge silence.";
 }
 
 function showCover() {
@@ -115,9 +154,9 @@ function watchJob(id) {
   $("player").removeAttribute("src");
   $("cancel").hidden = false;
   $("cancel").disabled = false;
-  $("cancel").textContent = "작업 취소";
+  $("cancel").textContent = "Cancel task";
   $("progress").value = 0;
-  controls(); saveDraft();
+  controls();
   pollJob(id);
 }
 
@@ -128,10 +167,15 @@ async function pollJob(id) {
     $("progress").value = job.progress;
     $("progress-eyebrow").textContent = job.kind === "analyze" ? "COLLECTING YOUR SONGS" : "MAKING YOUR MIX";
     $("progress-detail").textContent = job.kind === "analyze"
-      ? `${job.tracks.length}개 영상 확인 · 전체 길이를 확인하고 있어요.`
-      : `${job.tracks.length}곡 무음 정리 완료 · 정리된 길이 ${duration(job.trimmed_duration)} · 제거한 무음 ${(job.removed || 0).toFixed(1)}초`;
+      ? `${job.tracks.filter((track) => !track.pending).length} videos checked`
+      : `${job.tracks.length} tracks trimmed · ${duration(job.trimmed_duration)} · ${(job.removed || 0).toFixed(1)}s of silence removed`;
     if (job.kind === "analyze") {
-      state.tracks = job.tracks;
+      let index = 0;
+      state.tracks = state.tracks.map((track) => {
+        if (!track.input.trim()) return track;
+        const result = job.tracks[index++];
+        return result ? { ...result, input: track.input } : track;
+      });
       state.analysisId = job.status === "done" ? job.id : null;
       renderTracks();
     }
@@ -145,42 +189,61 @@ async function pollJob(id) {
     else if (job.kind === "render") {
       $("result").hidden = false;
       $("result-duration").textContent = duration(job.duration);
-      $("result-summary").textContent = `${job.tracks.length}곡 · ${(job.size / 1024 / 1024).toFixed(1)} MB · 무음 ${(job.removed || 0).toFixed(1)}초 제거`;
-      $("progress-title").textContent = "당신의 믹스가 완성됐어요.";
-      $("progress-detail").textContent = "아래에서 들어보거나 MP3를 저장하세요. outputs 폴더에도 원본이 보관돼요.";
+      $("result-summary").textContent = `${job.tracks.length} tracks · ${parseInt(job.bitrate || state.config.bitrate, 10)} kbps · ${(job.size / 1024 / 1024).toFixed(1)} MB · ${(job.removed || 0).toFixed(1)}s of silence removed`;
+      $("progress-title").textContent = "Your mix is ready.";
+      $("progress-detail").textContent = "Listen below or save your MP3. A copy is also kept in the outputs folder.";
       $("download").href = `/api/jobs/${job.id}/download`;
       $("download").download = job.filename;
       $("player").src = $("download").href;
-    } else if (state.tracks.some((track) => track.error)) notify("일부 영상 정보를 가져오지 못했어요. 표시된 이유를 확인하고 해당 곡을 제거하거나 목록을 다시 확인해주세요.");
+    } else if (state.tracks.some((track) => track.error)) notify("Some videos could not be checked. Use ↻ to retry or edit the link.");
     if (job.cleanup_warning) notify(job.cleanup_warning);
-    controls(); saveDraft();
+    if (job.kind === "analyze") renderTracks();
+    controls();
   } catch (error) {
     notify(error.message);
-    $("progress-title").textContent = "연결을 확인해주세요. 새로고침하면 진행 중인 작업을 다시 찾을 수 있어요.";
+    $("progress-title").textContent = "Check your connection. Reload the window to reconnect to the running task.";
     // Keep submission locked: a connection failure does not mean the worker stopped.
     $("cancel").hidden = true;
   }
 }
 
-$("links").addEventListener("input", () => {
-  state.analysisId = null; state.tracks = []; renderTracks(); saveDraft();
+$("add-link").addEventListener("click", () => {
+  state.tracks.push({ input: "" });
+  renderTracks();
+  $("track-list").lastElementChild.querySelector("input").focus();
 });
-for (const id of ["title", "artist", "album"]) $(id).addEventListener("input", () => { controls(); saveDraft(); });
+for (const id of ["title", "artist", "album"]) $(id).addEventListener("input", () => { controls(); });
 
-$("analyze").addEventListener("click", async () => {
+function scheduleAnalysis() {
+  clearTimeout(state.analysisTimer);
+  state.analysisTimer = setTimeout(() => {
+    state.analysisTimer = null;
+    analyzeLinks();
+  }, AUTO_ANALYZE_MS);
+}
+
+async function analyzeLinks() {
+  const tracks = state.tracks.filter((track) => track.input.trim());
+  if (state.busy || !tracks.length || !tracks.some((track) => !track.id || track.pending)) return;
+  if (state.tracks.some((track) => /\s/.test(track.input.trim()))) {
+    notify("Use one link per row. Paste multiple links together to split them automatically.");
+    return;
+  }
   notify(); state.busy = true; controls();
   try {
-    const job = await api("/api/analyze", { links: $("links").value });
-    state.analysisId = null; state.tracks = []; renderTracks(); watchJob(job.id);
+    const job = await api("/api/analyze", { links: state.tracks.map((track) => track.input.trim()).filter(Boolean).join("\n") });
+    state.analysisId = null; watchJob(job.id);
   } catch (error) { state.busy = false; controls(); notify(error.message); }
-});
+}
+
 
 $("render").addEventListener("click", async () => {
   notify(); state.busy = true; controls();
   try {
     const job = await api("/api/render", {
-      analysis_id: state.analysisId, track_ids: state.tracks.map((track) => track.id),
+      analysis_id: state.analysisId, track_ids: state.tracks.filter((track) => track.input.trim()).map((track) => track.id),
       title: $("title").value, artist: $("artist").value, album: $("album").value, cover: state.cover,
+      bitrate: $("bitrate").value,
     });
     watchJob(job.id);
     $("progress-panel").scrollIntoView({ behavior: "smooth", block: "nearest" });
@@ -189,12 +252,12 @@ $("render").addEventListener("click", async () => {
 
 $("cancel").addEventListener("click", async () => {
   $("cancel").disabled = true;
-  try { await api(`/api/jobs/${state.jobId}/cancel`, {}); $("cancel").textContent = "취소 중…"; }
+  try { await api(`/api/jobs/${state.jobId}/cancel`, {}); $("cancel").textContent = "Cancelling…"; }
   catch (error) { notify(error.message); $("cancel").disabled = false; }
 });
 
 $("choose-cover").addEventListener("click", () => $("cover-file").click());
-$("remove-cover").addEventListener("click", () => { state.cover = null; state.image = null; state.crop = null; showCover(); saveDraft(); });
+$("remove-cover").addEventListener("click", () => { state.cover = null; state.image = null; state.crop = null; showCover(); });
 
 function openCrop(image = state.image) {
   state.editingImage = image;
@@ -220,13 +283,13 @@ $("cover-file").addEventListener("change", async (event) => {
   const file = event.target.files[0];
   event.target.value = "";
   if (!file) return;
-  if (!state.config || file.size > state.config.image_max_bytes) { notify("표지 이미지는 20 MB 이하로 넣어주세요."); return; }
+  if (!state.config || file.size > state.config.image_max_bytes) { notify("Choose a cover image no larger than 20 MB."); return; }
   const url = URL.createObjectURL(file);
   try {
     const image = new Image(); image.src = url; await image.decode();
-    if (!image.naturalWidth || !image.naturalHeight || image.naturalWidth * image.naturalHeight > state.config.image_max_pixels) throw new Error("이미지 크기가 너무 크거나 올바르지 않아요. 4천만 화소 이하의 이미지를 사용하세요.");
+    if (!image.naturalWidth || !image.naturalHeight || image.naturalWidth * image.naturalHeight > state.config.image_max_pixels) throw new Error("The image is invalid or too large. Use an image with no more than 40 million pixels.");
     notify(); openCrop(image);
-  } catch (error) { notify(error instanceof DOMException ? "이미지를 열지 못했어요. JPG, PNG, WebP 등 브라우저가 읽을 수 있는 이미지를 사용하세요." : error.message); }
+  } catch (error) { notify(error instanceof DOMException ? "Unable to open the image. Use a supported image such as JPG, PNG, or WebP." : error.message); }
   finally { URL.revokeObjectURL(url); controls(); }
 });
 $("edit-cover").addEventListener("click", () => openCrop());
@@ -240,7 +303,7 @@ $("apply-crop").addEventListener("click", () => {
   state.cover = output.toDataURL("image/jpeg", 0.9);
   state.image = state.editingImage;
   state.crop = { zoom: Number($("zoom").value), x: Number($("crop-x").value), y: Number($("crop-y").value) };
-  showCover(); saveDraft(); $("crop-dialog").close();
+  showCover(); $("crop-dialog").close();
 });
 let drag = null;
 $("crop-canvas").addEventListener("pointerdown", (event) => {
@@ -260,34 +323,16 @@ for (const name of ["pointerup", "pointercancel", "lostpointercapture"]) $("crop
 
 async function init() {
   try {
+    localStorage.removeItem("mixtape-draft-v1");
+    for (const id of ["title", "artist", "album"]) { $(id).value = ""; $(id).autocomplete = "off"; }
     state.config = await api("/api/config");
-    $("links").maxLength = state.config.links_max_chars;
     for (const id of ["title", "artist", "album"]) $(id).maxLength = state.config.tag_max_chars;
-    $("bitrate-label").textContent = `${parseInt(state.config.bitrate, 10)} kbps`;
-    let draft = null;
-    try { draft = JSON.parse(localStorage.getItem(STORAGE_KEY)); }
-    catch (error) { notify("저장된 입력 내용을 읽지 못했어요. 다시 입력해주세요."); }
-    if (draft && typeof draft === "object") {
-      for (const id of ["links", "title", "artist", "album"]) if (typeof draft[id] === "string") $(id).value = draft[id];
-      if (typeof draft.cover === "string" && draft.cover.startsWith("data:image/jpeg;base64,")) {
-        state.cover = draft.cover;
-        const restored = new Image(); restored.src = draft.cover;
-        try { await restored.decode(); state.image = restored; } catch (error) { state.cover = null; notify("저장된 표지를 복원하지 못했어요. 이미지를 다시 선택해주세요."); }
-      }
-      if (draft.analysisId) {
-        try {
-          const analysis = await api(`/api/jobs/${encodeURIComponent(draft.analysisId)}`);
-          if (analysis.kind === "analyze" && analysis.status === "done") {
-            state.analysisId = analysis.id;
-            const byId = new Map(analysis.tracks.map((track) => [track.id, track]));
-            state.tracks = Array.isArray(draft.tracks) ? draft.tracks.map((track) => byId.get(track.id)).filter(Boolean) : analysis.tracks;
-          }
-        } catch (error) { notify("앱이 다시 시작됐어요. 입력한 링크의 목록을 다시 확인해주세요."); }
-      }
-    }
+    $("bitrate").replaceChildren(...state.config.bitrates.map((value) => new Option(`${parseInt(value, 10)} kbps`, value)));
+    $("bitrate").value = state.config.bitrate;
+    if (!state.tracks.length) state.tracks.push({ input: "" });
     showCover(); renderTracks();
-    if (state.config.missing.length) notify(`필수 도구가 없어요: ${state.config.missing.join(", ")}. README의 설치 안내를 확인하세요.`);
-    const jobId = state.config.active_job || draft?.jobId;
+    if (state.config.missing.length) notify(`Required tools are missing: ${state.config.missing.join(", ")}. See the setup instructions in the README.`);
+    const jobId = state.config.active_job;
     if (jobId) {
       try {
         const job = await api(`/api/jobs/${encodeURIComponent(jobId)}`);
@@ -295,6 +340,7 @@ async function init() {
       }
       catch (error) { state.jobId = null; controls(); }
     }
+
   } catch (error) { notify(error.message); }
 }
 init();

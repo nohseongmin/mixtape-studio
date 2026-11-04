@@ -4,7 +4,7 @@ import re
 import shutil
 import threading
 import uuid
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -12,7 +12,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 import audio
@@ -23,16 +23,25 @@ jobs = {}
 lock = threading.RLock()
 executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="mixtape")
 active_job = None
+is_stopping = False
+
+
+def cancel_jobs():
+    global is_stopping
+    with lock:
+        is_stopping = True
+        for job in jobs.values():
+            job["cancel"].set()
 
 
 @asynccontextmanager
 async def lifespan(app):
+    global is_stopping
+    is_stopping = False
     c.DATA_DIR.mkdir(parents=True, exist_ok=True)
     c.OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     yield
-    with lock:
-        for job in jobs.values():
-            job["cancel"].set()
+    cancel_jobs()
     executor.shutdown(wait=True, cancel_futures=True)
 
 
@@ -44,20 +53,20 @@ app.add_middleware(TrustedHostMiddleware, allowed_hosts=[c.HOST, "localhost"])
 async def local_only(request: Request, call_next):
     origin = request.headers.get("origin")
     if request.headers.get("sec-fetch-site") == "cross-site" or (origin and origin != str(request.base_url).rstrip("/")):
-        return JSONResponse({"detail": "이 앱의 로컬 화면에서 다시 시도해주세요."}, status_code=403)
+        return JSONResponse({"detail": "Please try again from the local application window."}, status_code=403)
     if request.method == "POST":
         if request.headers.get("x-mixtape-request") != "1":
-            return JSONResponse({"detail": "앱 화면에서 요청해주세요."}, status_code=403)
+            return JSONResponse({"detail": "Requests must come from the application window."}, status_code=403)
         try:
             if int(request.headers.get("content-length", "0")) > c.REQUEST_MAX_BYTES:
-                return JSONResponse({"detail": "입력 데이터가 너무 커요."}, status_code=413)
+                return JSONResponse({"detail": "The input is too large."}, status_code=413)
         except ValueError:
-            return JSONResponse({"detail": "잘못된 요청이에요."}, status_code=400)
+            return JSONResponse({"detail": "Invalid request."}, status_code=400)
         body = bytearray()
         async for chunk in request.stream():
             body.extend(chunk)
             if len(body) > c.REQUEST_MAX_BYTES:
-                return JSONResponse({"detail": "입력 데이터가 너무 커요."}, status_code=413)
+                return JSONResponse({"detail": "The input is too large."}, status_code=413)
         request._body = bytes(body)
     response = await call_next(request)
     response.headers["X-Content-Type-Options"] = "nosniff"
@@ -69,7 +78,7 @@ async def local_only(request: Request, call_next):
 
 @app.exception_handler(RequestValidationError)
 async def validation_error(request, exc):
-    return JSONResponse({"detail": "입력 형식이나 길이를 확인해주세요. 제목·가수·앨범은 각각 200자까지 입력할 수 있어요."}, status_code=422)
+    return JSONResponse({"detail": "Check the input format and length. Title, artist, and album accept up to 200 characters each."}, status_code=422)
 
 
 class InputModel(BaseModel):
@@ -87,6 +96,14 @@ class RenderInput(InputModel):
     artist: str = Field(default="", max_length=c.TAG_MAX_CHARS, strict=True)
     album: str = Field(default="", max_length=c.TAG_MAX_CHARS, strict=True)
     cover: str | None = Field(default=None, max_length=c.REQUEST_MAX_BYTES)
+    bitrate: str = Field(default=c.BITRATE, strict=True)
+
+    @field_validator("bitrate")
+    @classmethod
+    def supported_bitrate(cls, value):
+        if value not in c.MP3_BITRATES:
+            raise ValueError("Unsupported MP3 bitrate.")
+        return value
 
 
 def update_job(job_id, **values):
@@ -97,11 +114,13 @@ def update_job(job_id, **values):
 def start_job(kind, task, payload):
     global active_job
     with lock:
+        if is_stopping:
+            raise HTTPException(503, "The application is shutting down.")
         if active_job is not None:
-            raise HTTPException(409, "다른 작업이 진행 중이에요. 완료하거나 취소한 뒤 다시 시도하세요.")
+            raise HTTPException(409, "Another task is running. Wait for it to finish or cancel it first.")
         job_id = uuid.uuid4().hex
         jobs[job_id] = {"id": job_id, "kind": kind, "status": "running", "progress": 0,
-                        "message": "작업 준비 중", "tracks": [], "cancel": threading.Event()}
+                        "message": "Getting ready", "tracks": [], "cancel": threading.Event()}
         active_job = job_id
         executor.submit(run_job, job_id, task, payload)
         return {"id": job_id}
@@ -112,8 +131,8 @@ def run_job(job_id, task, payload):
     try:
         task(job_id, payload)
         if jobs[job_id]["cancel"].is_set():
-            raise audio.Cancelled("작업을 취소했어요.")
-        update_job(job_id, status="done", progress=100, message="완료했어요.")
+            raise audio.Cancelled("Task cancelled.")
+        update_job(job_id, status="done", progress=100, message="Done.")
     except audio.Cancelled as exc:
         update_job(job_id, status="cancelled", message=str(exc))
     except audio.TaskError as exc:
@@ -121,28 +140,56 @@ def run_job(job_id, task, payload):
     except Exception as exc:
         # The worker boundary must release the queue even after an unexpected library error.
         logger.error("Job %s failed: %s", job_id, type(exc).__name__)
-        update_job(job_id, status="error", message="처리를 마치지 못했어요. 저장 공간과 실행 환경을 확인한 뒤 다시 시도하세요.")
+        update_job(job_id, status="error", message="Processing could not finish. Check disk space and the application setup, then try again.")
     finally:
         with lock:
             active_job = None
 
 
 def analyze_job(job_id, links):
-    tracks = []
-    for index, url in enumerate(links):
-        update_job(job_id, progress=100 * index / len(links), message=f"{index + 1}/{len(links)} · 영상 정보 확인 중")
+    cancel = jobs[job_id]["cancel"]
+    tracks = [{"id": uuid.uuid4().hex, "url": url, "title": "Waiting for video details", "duration": 0,
+               "pending": True} for url in links]
+    with lock:
+        known = {track["url"]: {key: track[key] for key in ("url", "title", "duration")}
+                 for job in jobs.values() if job["kind"] == "analyze"
+                 for track in job["tracks"] if not track.get("pending") and not track.get("error")}
+    missing = [url for url in dict.fromkeys(links) if url not in known]
+
+    def publish():
+        for track in tracks:
+            if track["url"] in known:
+                track.update(known[track["url"]], pending=False)
+        completed = sum(not track["pending"] for track in tracks)
+        update_job(job_id, tracks=copy.deepcopy(tracks), expected_duration=sum(t["duration"] for t in tracks),
+                   progress=100 * completed / len(tracks),
+                   message=f"{completed}/{len(tracks)} · checked")
+
+    publish()
+    with ThreadPoolExecutor(max_workers=c.METADATA_WORKERS, thread_name_prefix="metadata") as pool:
+        futures = {pool.submit(audio.inspect_video, url, cancel): url for url in missing}
         try:
-            track = audio.inspect_video(url, jobs[job_id]["cancel"])
-        except audio.Cancelled:
+            for future in as_completed(futures):
+                if cancel.is_set():
+                    raise audio.Cancelled("Task cancelled.")
+                url = futures[future]
+                try:
+                    track = future.result()
+                except audio.Cancelled:
+                    raise
+                except audio.TaskError as exc:
+                    track = {"url": url, "title": "Video lookup failed", "duration": 0, "error": str(exc)}
+                known[url] = track
+                publish()
+        except Exception:
+            cancel.set()
+            for future in futures:
+                future.cancel()
             raise
-        except audio.TaskError as exc:
-            track = {"url": url, "title": f"{index + 1}번째 영상", "duration": 0, "error": str(exc)}
-        tracks.append({"id": uuid.uuid4().hex, **track})
-        update_job(job_id, tracks=list(tracks), expected_duration=sum(item["duration"] for item in tracks))
 
 
 def render_job(job_id, payload):
-    tracks, tags, cover = payload
+    tracks, tags, cover, bitrate = payload
     cancel = jobs[job_id]["cancel"]
     directory = c.DATA_DIR / job_id
     directory.mkdir(parents=True)
@@ -150,27 +197,27 @@ def render_job(job_id, payload):
     completed = []
     try:
         for index, track in enumerate(tracks):
-            update_job(job_id, progress=90 * index / len(tracks), message=f"{index + 1}/{len(tracks)} · 오디오 다운로드: {track['title']}")
+            update_job(job_id, progress=90 * index / len(tracks), message=f"{index + 1}/{len(tracks)} · Downloading audio: {track['title']}")
             track_dir = directory / str(index)
             track_dir.mkdir()
             source = audio.download_audio(track["url"], track_dir, cancel)
-            update_job(job_id, message=f"{index + 1}/{len(tracks)} · 앞뒤 무음 제거: {track['title']}")
+            update_job(job_id, message=f"{index + 1}/{len(tracks)} · Trimming edge silence: {track['title']}")
             result = audio.trim_audio(source, directory / f"{index}.wav", cancel)
             source.unlink()
             completed.append({**track, **result})
             update_job(job_id, tracks=list(completed), trimmed_duration=sum(item["duration"] for item in completed),
                        removed=sum(item["removed"] for item in completed))
         (directory / "tracks.txt").write_text("".join(f"file '{index}.wav'\n" for index in range(len(tracks))), encoding="utf-8")
-        update_job(job_id, progress=92, message="전체 오디오를 하나의 MP3로 합치는 중")
-        duration = audio.merge_audio(directory, output, cancel)
+        update_job(job_id, progress=92, message="Combining all tracks into one MP3")
+        duration = audio.merge_audio(directory, output, cancel, bitrate=bitrate)
         if abs(duration - sum(item["duration"] for item in completed)) > c.ENCODE_TOLERANCE:
-            raise audio.TaskError("완성 파일의 길이가 곡 합계와 달라요. 불완전한 결과를 저장하지 않았어요. 다시 시도하세요.")
-        update_job(job_id, progress=98, message="제목·가수·앨범·표지 저장 중")
+            raise audio.TaskError("The output duration does not match the track total. The incomplete file was discarded. Please try again.")
+        update_job(job_id, progress=98, message="Writing title, artist, album, and cover")
         audio.write_tags(output, tags, cover)
         if cancel.is_set():
-            raise audio.Cancelled("작업을 취소했어요.")
+            raise audio.Cancelled("Task cancelled.")
         filename = re.sub(r'[<>:"/\\|?*\x00-\x1f]', "_", tags["title"]).strip(" .") or "mixtape"
-        update_job(job_id, duration=duration, size=output.stat().st_size, filename=f"{filename}.mp3", output=output)
+        update_job(job_id, duration=duration, size=output.stat().st_size, filename=f"{filename}.mp3", output=output, bitrate=bitrate)
     except Exception:
         output.unlink(missing_ok=True)
         raise
@@ -179,7 +226,7 @@ def render_job(job_id, payload):
             shutil.rmtree(directory)
         except OSError as exc:
             logger.warning("Temporary audio cleanup failed: %s", type(exc).__name__)
-            update_job(job_id, cleanup_warning="임시 파일 일부를 지우지 못했어요. 앱을 종료한 뒤 data 폴더를 정리해주세요.")
+            update_job(job_id, cleanup_warning="Some temporary files could not be removed. Close the app before cleaning the data folder.")
 
 
 @app.get("/api/config")
@@ -188,7 +235,7 @@ def configuration():
     return {"app": "mixtape-studio", "missing": missing, "cover_size": c.COVER_SIZE, "image_max_bytes": c.IMAGE_MAX_BYTES,
             "image_max_pixels": c.IMAGE_MAX_PIXELS, "links_max_chars": c.LINKS_MAX_CHARS,
             "tag_max_chars": c.TAG_MAX_CHARS, "silence_db": c.SILENCE_DB, "bitrate": c.BITRATE,
-            "active_job": active_job}
+            "bitrates": c.MP3_BITRATES, "active_job": active_job}
 
 
 @app.post("/api/analyze")
@@ -203,24 +250,24 @@ def analyze(data: AnalyzeInput):
 @app.post("/api/render")
 def render(data: RenderInput):
     if configuration()["missing"]:
-        raise HTTPException(503, "필수 처리 도구가 없어요. 시작 화면의 설치 안내를 확인하세요.")
+        raise HTTPException(503, "Required media tools are missing. See the setup instructions.")
     with lock:
         analysis = jobs.get(data.analysis_id.hex)
         if not analysis or analysis["kind"] != "analyze" or analysis["status"] != "done":
-            raise HTTPException(422, "먼저 링크 목록을 확인해주세요.")
+            raise HTTPException(422, "Wait for the video links to be checked first.")
         available = {item["id"]: item for item in analysis["tracks"]}
         ids = [value.hex for value in data.track_ids]
         if len(set(ids)) != len(ids) or any(value not in available for value in ids):
-            raise HTTPException(422, "곡 목록이 올바르지 않아요. 링크를 다시 확인해주세요.")
+            raise HTTPException(422, "The track list is invalid. Check the video links again.")
         tracks = [available[value] for value in ids]
         if any(item.get("error") for item in tracks):
-            raise HTTPException(422, "가져올 수 없는 영상을 목록에서 제거하거나 링크를 다시 확인해주세요.")
+            raise HTTPException(422, "Remove unavailable videos or check their links again.")
     try:
         cover = audio.decode_cover(data.cover)
     except audio.TaskError as exc:
         raise HTTPException(422, str(exc)) from exc
     tags = {name: getattr(data, name) for name in ("title", "artist", "album")}
-    return start_job("render", render_job, (tracks, tags, cover))
+    return start_job("render", render_job, (tracks, tags, cover, data.bitrate))
 
 
 @app.get("/api/jobs/{job_id}")
@@ -228,7 +275,7 @@ def get_job(job_id: uuid.UUID):
     with lock:
         job = jobs.get(job_id.hex)
         if not job:
-            raise HTTPException(404, "이 작업을 찾을 수 없어요. 앱을 다시 실행했다면 링크를 다시 확인해주세요.")
+            raise HTTPException(404, "Task not found. If you restarted the app, enter the links again.")
         return copy.deepcopy({key: value for key, value in job.items() if key not in {"cancel", "output"}})
 
 
@@ -237,7 +284,7 @@ def cancel_job(job_id: uuid.UUID):
     with lock:
         job = jobs.get(job_id.hex)
         if not job:
-            raise HTTPException(404, "작업을 찾을 수 없어요.")
+            raise HTTPException(404, "Task not found.")
         if job["status"] == "running":
             job["cancel"].set()
     return {"ok": True}
@@ -248,7 +295,7 @@ def download(job_id: uuid.UUID):
     with lock:
         job = jobs.get(job_id.hex)
         if not job or job["kind"] != "render" or job["status"] != "done" or not job["output"].is_file():
-            raise HTTPException(404, "완성된 MP3 파일이 없어요.")
+            raise HTTPException(404, "No completed MP3 file is available.")
         return FileResponse(job["output"], media_type="audio/mpeg", filename=job["filename"])
 
 

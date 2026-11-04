@@ -4,7 +4,9 @@ python -m venv --without-pip .venv
 if errorlevel 1 goto :failed
 python -m pip --python .venv\Scripts\python.exe install -r requirements.txt
 if errorlevel 1 goto :failed
-echo Setup complete. Open Start-Mixtape.cmd to launch.
+".venv\Scripts\python.exe" create_shortcuts.py
+if errorlevel 1 goto :failed
+echo Setup complete. Open the Mixtape desktop icon to launch.
 pause
 exit /b 0
 :failed

@@ -1,81 +1,174 @@
+<div align="center">
+
 # Mixtape
 
-유튜브 영상 여러 개 → 앞뒤 무음 제거 → 하나의 MP3 → 직접 고른 정사각형 커버와 제목·가수·앨범 태그.
+**Your playlist. One file.**
 
-## 실행
+Turn a list of YouTube videos into one continuous MP3, with your own title,
+artist, album, and square cover art. Made for the music player in your pocket.
 
-이 컴퓨터에는 필요한 의존성을 설치해 두었습니다. **`Start-Mixtape.cmd`를 더블클릭**하세요. 브라우저가 자동으로 열립니다. 실행 창을 닫으면 앱이 종료됩니다.
+[**Download for Windows**](https://github.com/nohseongmin/mixtape-studio/releases/latest) ·
+[How it works](#how-it-works) · [Build from source](#build-from-source)
 
-터미널에서 실행하려면:
+![Mixtape desktop app](docs/screenshot.png)
 
-```powershell
-cd 'C:\Claude Projects\mixtape-studio'
-.\.venv\Scripts\python.exe launch.py
+</div>
+
+## What it does
+
+- **One MP3, your whole list.** Combine 1, 300, or more individual video links in
+  your chosen order. No one-hour cutoff. Input is limited to 200,000 characters.
+- **Automatic video details.** Paste several links or add them one by one. Titles
+  and durations appear after you stop typing. Up to four new videos are checked
+  concurrently; successful lookups are reused during the current session.
+- **Trim the edges.** Remove silence at the beginning and end of each track while
+  preserving pauses inside the music. No added gaps, crossfading, or normalization.
+- **Make it yours.** Add title, artist, album, and optional cover art. Drag and zoom
+  to crop a supported image to an 800 × 800 JPEG square.
+- **Choose your bitrate.** 128, 192, 256, or 320 kbps MP3 at 44.1 kHz stereo.
+  Higher bitrates use more space; they cannot restore detail absent from the source.
+- **One window, one lifetime.** No command prompt or background service to manage.
+  Closing the window stops the server, downloads, and converters.
+- **A fresh start every time.** Links, video details, tags, cover art, and quality
+  selections are not restored after restarting the app.
+
+## Download and run
+
+1. Download **`Mixtape.exe`** from [Releases](https://github.com/nohseongmin/mixtape-studio/releases/latest).
+2. Put it in a writable folder of your choice and double-click it.
+3. Paste video links, arrange the tracks, add a title, and select your MP3 quality.
+4. Click **Create one MP3**. Listen to the result or use **Save MP3** to copy it
+   elsewhere. A completed copy stays in `outputs` beside the executable.
+
+The release is a **single Windows x64 executable**, including Python, yt-dlp,
+FFmpeg, FFprobe, and Node.js. No terminal installation is needed. Windows 10 22H2
+or Windows 11 and the [Microsoft Edge WebView2 Runtime](https://developer.microsoft.com/en-us/microsoft-edge/webview2/)
+are required. The runtime is commonly already installed. Other platforms have not
+been tested.
+
+The executable is unsigned; its SHA-256 checksum is published with each release.
+Startup takes a few seconds while the bundle extracts its tools. Keep enough free
+disk space for extracted tools, temporary uncompressed audio, and your finished
+MP3. Long lists can require several gigabytes.
+
+## How it works
+
+```text
+Video links → automatic titles + durations → your track order
+                                               ↓
+Best available source audio → trim edge silence → concatenate
+                                               ↓
+                          one MP3 encode → tags + square cover
 ```
 
-1. 개별 유튜브 영상 링크를 한 줄에 하나씩 붙여넣고 **목록 확인**을 누릅니다.
-2. 제목·재생시간을 확인합니다. ↑/↓로 순서를 바꾸고 ×로 곡을 뺄 수 있습니다.
-3. 제목(필수), 가수, 앨범을 입력합니다. 표지는 선택사항입니다.
-4. 커버 이미지를 선택하고 드래그 또는 슬라이더로 자를 부분을 골라 **이 부분 사용하기**를 누릅니다.
-5. **하나의 MP3 만들기**를 누릅니다. 완료 후 미리듣기와 **MP3 저장하기**를 사용할 수 있습니다.
+Only individual YouTube videos are accepted, including `youtu.be`, watch, Shorts,
+and completed live-video links. Playlist URLs, scheduled streams, and ongoing
+live streams are not supported. Private, restricted, removed, or blocked videos
+may be unavailable. Edit, remove, or retry failed rows with **↻**.
 
-최종 MP3는 `outputs` 폴더에도 작업별 고유 이름으로 보관됩니다. 브라우저에서 저장할 때는 입력한 제목이 파일 이름에 적용됩니다.
+The estimate uses reported video lengths. The final duration is shorter when
+edge silence is removed. Silence detection uses a −50 dB threshold for intervals
+of at least 0.12 seconds. Very quiet introductions or endings may therefore be
+trimmed. The final MP3 is encoded once, after concatenation.
 
-## 동작 기준
+## Files and privacy
 
-- 1시간 제한·자동 곡 선별은 없습니다. 입력한 모든 곡을 선택한 순서대로 끝까지 이어 붙입니다.
-- 300개를 넘겨도 처리할 수 있습니다. 다만 입력 텍스트는 200,000자까지이며, 실제 한계는 디스크·처리 시간·유튜브의 접근 제한입니다.
-- 예상 길이는 **원본 영상 길이의 합계**입니다. 무음 길이는 다운로드·분석 전에는 알 수 없으므로, 변환 후 실제 길이와 제거한 초 수를 별도로 표시합니다.
-- 각 곡의 시작·끝에서 **-50dB 이하로 0.12초 이상 이어지는 구간**을 무음으로 판단합니다. 곡 중간의 쉼은 유지합니다. 아주 작은 페이드·잔향은 무음으로 판정될 수 있습니다.
-- 광고/말소리/인트로처럼 소리가 있는 구간은 무음이 아니므로 자동 제거하지 않습니다. 이미 한 영상 안에 들어 있는 곡 사이 무음도 유지합니다.
-- MP3 192kbps / 44.1kHz / 스테레오 / ID3v2.3. 음질은 원본보다 좋아지지 않습니다.
-- JPG·PNG·WebP·GIF 등 브라우저에서 읽을 수 있는 이미지를 지원합니다. GIF는 정지 이미지로 저장됩니다. HEIC·RAW 등은 먼저 JPG/PNG로 변환하세요.
-- 표지는 최대 20MiB·4천만 화소 입력을 허용하며, 선택한 영역을 800×800 JPEG로 파일 안에 삽입합니다. 투명 배경은 흰색으로 처리합니다.
-- 브라우저를 새로고침하면 입력·정사각형 표지·진행 중 작업을 복구합니다. 원본 이미지 전체는 저장하지 않으므로 새로고침 후 자르기 수정은 저장된 사각형 범위 내에서 가능합니다.
-- 앱 프로세스를 다시 시작하면 작업 목록은 초기화됩니다. 완료 파일은 `outputs`에 남고, 입력 링크는 브라우저에 남습니다. 목록 확인을 다시 누르세요.
-- 실패한 곡을 조용히 건너뛰지 않습니다. 오류가 나면 이유를 표시하고 사용자가 목록을 수정하거나 재시도합니다. 재시도 시 다운로드를 다시 수행합니다.
+| Location | Contents |
+| --- | --- |
+| `Mixtape.exe` | The application and bundled tools |
+| `outputs/` | Completed MP3s, retained until you remove them |
+| `data/desktop.log` | Rotating diagnostic log |
+| `data/webview/` | Local WebView2 runtime profile |
+| Temporary job folders in `data/` | Working audio; removed after completion or normal cancellation |
 
-## 저장 공간과 처리
+Successful video lookups are reused **only in process memory**. There is no saved
+playlist or video metadata database. The app does not restore links, tags, or
+images, and disables yt-dlp's disk cache. The WebView2 profile and diagnostic logs
+are separate from playlist data. A crash or forced termination may leave temporary
+files; close the app before removing its `data` folder.
 
-모든 오디오를 메모리에 올리지 않습니다. 곡별로 다운로드·분석한 뒤 표준 PCM WAV로 디스크에 저장하고, 마지막에 MP3로 한 번만 인코딩합니다. 임시 오디오에는 **1시간당 약 606MiB**와 현재 다운로드 및 최종 MP3 공간이 필요합니다. 예: 300곡 × 4분이면 총 20시간, 임시 WAV만 약 11.8GiB입니다.
+The UI and processing run locally. Metadata and audio requests still go to
+YouTube and its delivery servers over your internet connection. Mixtape has no
+account system, analytics endpoint, or cloud upload service. MP3s contain the
+tags and cover art you intentionally supplied.
 
-완료·오류·취소 시 해당 작업의 임시 파일을 정리합니다. 강제 종료·전원 차단으로 남은 `data` 안의 작업 폴더는 **앱을 종료한 뒤** 지워도 됩니다. `outputs`는 자동 삭제하지 않습니다.
+Use only content you own or have permission to download and process, and follow
+the source service's terms. Mixtape does not bypass DRM, import account cookies,
+or provide access to restricted content. It is not affiliated with YouTube.
 
-## 다른 컴퓨터에 설치
+## Build from source
 
-필요 환경: Windows, Python 3.12 이상과 pip, FFmpeg/FFprobe, Node.js 22 이상. 각 도구는 공식 배포 경로에서 설치하고 PATH에 등록하세요.
-
-- [Python](https://www.python.org/downloads/)
-- [FFmpeg](https://ffmpeg.org/download.html)
-- [Node.js](https://nodejs.org/en/download)
-
-`setup.cmd`를 실행한 뒤 `Start-Mixtape.cmd`를 실행하세요. Python 의존성은 프로젝트 `.venv`에만 설치됩니다. 버전은 `requirements.txt`와 `constraints.txt`에 고정되어 있습니다. 유튜브가 변경되면 yt-dlp 업데이트가 필요할 수 있습니다.
-
-## 설정
-
-기본값과 환경변수 처리는 `config.py`에 모여 있습니다.
-
-| 환경변수 | 기본 동작 |
-|---|---|
-| `MIXTAPE_PORT` | 8765. 다른 포트 번호 또는 0(비어 있는 포트 자동 선택) 지정 가능 |
-| `MIXTAPE_FFMPEG`, `MIXTAPE_FFPROBE`, `MIXTAPE_NODE` | PATH에서 실행 파일 검색 |
-| `MIXTAPE_DATA_DIR`, `MIXTAPE_OUTPUT_DIR` | 프로젝트의 `data`, `outputs` |
-| `MIXTAPE_NETWORK_TIMEOUT` | 네트워크 요청당 20초 |
-| `MIXTAPE_METADATA_TIMEOUT` | 영상 정보 조회당 120초 |
-| `MIXTAPE_PROCESS_TIMEOUT` | 다운로드/변환 프로세스당 7,200초 |
-
-입력 초안은 브라우저의 사이트별 저장소에 있으므로 자동 포트가 바뀌면 이전 초안이 표시되지 않을 수 있습니다. 반복 사용 시 `MIXTAPE_PORT`로 비어 있는 고정 포트를 지정할 수 있습니다.
-
-## 구현과 검증
-
-Python/FastAPI, yt-dlp, FFmpeg, Mutagen, Pillow와 빌드 없는 HTML/CSS/JavaScript로 구현했습니다. 루프백 전용 바인딩, Host/Origin 검사, 요청 헤더 검사, URL·이미지·태그 검증, CSP, 인자 배열 기반 프로세스 실행을 적용했습니다. 계정·쿠키·API 키는 수집하지 않습니다.
+Use **64-bit Python 3.12 on Windows**. Clone the repository, then run these commands
+from its directory in PowerShell:
 
 ```powershell
-python -m pip --python .venv\Scripts\python.exe install -r requirements-dev.txt
-.\.venv\Scripts\python.exe -m pytest -q
+python -m venv --without-pip .venv
+python -m pip --python .venv\Scripts\python.exe install -r requirements-build.txt
+.venv\Scripts\python.exe build.py
+```
+
+The build downloads the exact tools in `build-tools.json`, verifies their SHA-256
+hashes, collects license notices, and runs PyInstaller. Output:
+
+```text
+dist/Mixtape.exe
+dist/SHA256SUMS.txt
+dist/Mixtape-licenses.zip
+```
+
+Upstream FFmpeg daily releases have limited retention. If a pinned URL expires,
+obtain the same tool from the release's build-input archive and put it in
+`build/downloads`; the build still checks its pinned hash. Updating a tool requires
+changing its URL and verified hash deliberately.
+
+Run the source version using the downloaded tools:
+
+```powershell
+$env:MIXTAPE_FFMPEG = "$PWD\build\tools\ffmpeg.exe"
+$env:MIXTAPE_FFPROBE = "$PWD\build\tools\ffprobe.exe"
+$env:MIXTAPE_NODE = "$PWD\build\tools\node.exe"
+.venv\Scripts\pythonw.exe Mixtape.pyw
+```
+
+Alternatively, install FFmpeg/FFprobe and Node.js on `PATH`, run `setup.cmd`, and
+use the generated desktop shortcut. Source launchers use a virtual environment;
+the downloadable EXE does not.
+
+### Configuration
+
+Defaults live in `config.py`. Optional environment overrides:
+
+| Variable | Purpose |
+| --- | --- |
+| `MIXTAPE_DATA_DIR` | Working files, log, and WebView2 profile |
+| `MIXTAPE_OUTPUT_DIR` | Completed MP3 directory |
+| `MIXTAPE_FFMPEG`, `MIXTAPE_FFPROBE`, `MIXTAPE_NODE` | Alternative compatible tools |
+| `MIXTAPE_PORT` | Loopback port; packaged builds choose a free port by default |
+| `MIXTAPE_NETWORK_TIMEOUT` | Network timeout in seconds; default 20 |
+| `MIXTAPE_METADATA_TIMEOUT` | Per-video lookup timeout; default 120 |
+| `MIXTAPE_PROCESS_TIMEOUT` | Per-media-process timeout; default 7,200 |
+
+The server binds only to `127.0.0.1`. Requests have origin, host, size, and input
+validation checks. This is a local desktop tool, not a public web service.
+
+### Verification
+
+After setting the tool paths above:
+
+```powershell
+.venv\Scripts\python.exe -m pytest -q
 node --check static/app.js
+git diff --check
 ```
 
-테스트는 실제 FFmpeg로 경계 무음 제거·내부 쉼 보존·서로 다른 샘플레이트 합치기·곡 순서·한글 태그·표지·파일 다운로드와 Range 요청을 확인합니다. 그 밖에 URL 입력 검증, 301개/1시간 초과 처리, 외부 사이트 요청 거부, 취소·중복 작업 거부를 검사합니다. 네트워크 다운로드는 자동 테스트에서 대체하고 실제 공개 영상으로 별도 검증합니다.
+Tests cover real encoding at every bitrate, Unicode tags, square covers, track
+order, internal pauses, validation, retries, metadata reuse, the actual WebView UI,
+fresh-start behavior, and process shutdown. See [VERIFICATION.md](VERIFICATION.md)
+for release checks and [BLUEPRINT.md](BLUEPRINT.md) for the architecture.
 
-`BLUEPRINT.md`에 범위·가정·도구 선택·향후 계획을 정리했습니다. 개인용 무료 도구이며, 수익화·로그인·공개 호스팅은 포함하지 않습니다.
+## License and credits
+
+Mixtape is released under [GPL-3.0-or-later](LICENSE). Built with pywebview,
+FastAPI, yt-dlp, FFmpeg, Mutagen, Pillow, and Node.js. Bundled software keeps its
+own license; see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) and the license
+archive in each release.

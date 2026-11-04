@@ -13,7 +13,9 @@ from concurrent.futures import ThreadPoolExecutor
 import pytest
 from fastapi.testclient import TestClient
 from mutagen.id3 import ID3
+from mutagen.mp3 import MP3
 from PIL import Image
+from pydantic import ValidationError
 
 import app
 import audio
@@ -88,7 +90,7 @@ def test_edge_trimming_preserves_internal_pause(tmp_path):
 
 def test_all_silent_track_is_an_error(tmp_path):
     source = make_wave(tmp_path / "silence.wav", [(1, 0)])
-    with pytest.raises(audio.TaskError, match="무음을 제외한"):
+    with pytest.raises(audio.TaskError, match="non-silent audio"):
         audio.trim_audio(source, tmp_path / "trimmed.wav", threading.Event())
 
 
@@ -118,13 +120,14 @@ def test_local_request_security_and_input_limits(client):
     assert client.get("/api/jobs/not-a-uuid/download").status_code == 422
 
 
-def test_end_to_end_real_encoding_tags_cover_order_and_cleanup(client, monkeypatch, tmp_path):
+@pytest.mark.parametrize("bitrate", c.MP3_BITRATES)
+def test_end_to_end_real_encoding_tags_cover_order_and_cleanup(client, monkeypatch, tmp_path, bitrate):
     first = make_wave(tmp_path / "first.wav", [(0.4, 0), (0.4, 440), (0.3, 0), (0.4, 440), (0.5, 0)])
     second = make_wave(tmp_path / "second.wav", [(0.25, 0), (0.6, 880), (0.35, 0)], rate=48000)
     sources = {VIDEO_A: first, VIDEO_B: second}
 
     def inspect(url, cancel):
-        return {"url": url, "title": "첫 곡" if url == VIDEO_A else "둘째 곡", "duration": 2.0 if url == VIDEO_A else 1.2}
+        return {"url": url, "title": "First track" if url == VIDEO_A else "Second track", "duration": 2.0 if url == VIDEO_A else 1.2}
 
     def download(url, directory, cancel):
         target = directory / "source.wav"
@@ -137,18 +140,20 @@ def test_end_to_end_real_encoding_tags_cover_order_and_cleanup(client, monkeypat
     analysis = wait_job(client, analyzed["id"])
     assert analysis["expected_duration"] == 3.2
     request = {"analysis_id": analysis["id"], "track_ids": [track["id"] for track in reversed(analysis["tracks"])],
-               "title": "새벽 산책", "artist": "여러 가수", "album": "내 앨범", "cover": cover_url()}
+               "title": "Midnight walk — café", "artist": "Various artists", "album": "My album", "cover": cover_url(), "bitrate": bitrate}
     result_id = client.post("/api/render", json=request, headers=HEADERS).json()["id"]
     result = wait_job(client, result_id)
     assert result["status"] == "done", result
     assert result["duration"] == pytest.approx(1.7, abs=0.08)
     assert result["removed"] == pytest.approx(1.5, abs=0.02)
     output = c.OUTPUT_DIR / f"{result_id}.mp3"
+    assert result["bitrate"] == bitrate
+    assert MP3(output).info.bitrate == pytest.approx(int(bitrate[:-1]) * 1000, abs=1000)
     tags = ID3(output)
     assert tags.version == (2, 3, 0)
-    assert str(tags["TIT2"]) == "새벽 산책"
-    assert str(tags["TPE1"]) == "여러 가수"
-    assert str(tags["TALB"]) == "내 앨범"
+    assert str(tags["TIT2"]) == "Midnight walk — café"
+    assert str(tags["TPE1"]) == "Various artists"
+    assert str(tags["TALB"]) == "My album"
     with Image.open(io.BytesIO(tags.getall("APIC")[0].data)) as image:
         assert image.size == (c.COVER_SIZE, c.COVER_SIZE)
     decoded = tmp_path / "decoded.wav"
@@ -159,7 +164,7 @@ def test_end_to_end_real_encoding_tags_cover_order_and_cleanup(client, monkeypat
     section = samples[round(rate * 0.1):round(rate * 0.3)]
     crossings = sum(left <= 0 < right for left, right in zip(section, section[1:]))
     assert crossings / 0.2 == pytest.approx(880, abs=10)
-    assert not any(c.DATA_DIR.iterdir())
+    assert not any(path.is_dir() for path in c.DATA_DIR.iterdir())
     downloaded = client.get(f"/api/jobs/{result_id}/download")
     assert downloaded.status_code == 200
     assert downloaded.content == output.read_bytes()
@@ -168,7 +173,7 @@ def test_end_to_end_real_encoding_tags_cover_order_and_cleanup(client, monkeypat
 
 
 def test_301_tracks_and_more_than_one_hour_are_not_truncated(client, monkeypatch):
-    monkeypatch.setattr(audio, "inspect_video", lambda url, cancel: {"url": url, "title": "곡", "duration": 240})
+    monkeypatch.setattr(audio, "inspect_video", lambda url, cancel: {"url": url, "title": "Track", "duration": 240})
     job = client.post("/api/analyze", json={"links": "\n".join([VIDEO_A] * 301)}, headers=HEADERS).json()
     result = wait_job(client, job["id"])
     assert len(result["tracks"]) == 301
@@ -177,7 +182,7 @@ def test_301_tracks_and_more_than_one_hour_are_not_truncated(client, monkeypatch
 
 def test_failed_track_not_silently_skipped(client, monkeypatch):
     def unavailable(url, cancel):
-        raise audio.TaskError("사용할 수 없는 영상")
+        raise audio.TaskError("Unavailable video")
     monkeypatch.setattr(audio, "inspect_video", unavailable)
     job = client.post("/api/analyze", json={"links": VIDEO_A}, headers=HEADERS).json()
     result = wait_job(client, job["id"])
@@ -200,8 +205,8 @@ def test_cancel_stops_process():
 def test_busy_queue_cancellation_and_recovery(client, monkeypatch):
     def slow(url, cancel):
         if cancel.wait(5):
-            raise audio.Cancelled("작업을 취소했어요.")
-        return {"url": url, "title": "곡", "duration": 1}
+            raise audio.Cancelled("Task cancelled.")
+        return {"url": url, "title": "Track", "duration": 1}
     monkeypatch.setattr(audio, "inspect_video", slow)
     job = client.post("/api/analyze", json={"links": VIDEO_A}, headers=HEADERS).json()
     assert client.post("/api/analyze", json={"links": VIDEO_A}, headers=HEADERS).status_code == 409
@@ -212,14 +217,14 @@ def test_busy_queue_cancellation_and_recovery(client, monkeypatch):
 
 def test_incomplete_encode_is_not_delivered(client, monkeypatch, tmp_path):
     source = make_wave(tmp_path / "tone.wav", [(0.5, 440)])
-    monkeypatch.setattr(audio, "inspect_video", lambda url, cancel: {"url": url, "title": "곡", "duration": 0.5})
+    monkeypatch.setattr(audio, "inspect_video", lambda url, cancel: {"url": url, "title": "Track", "duration": 0.5})
 
     def download(url, directory, cancel):
         target = directory / "source.wav"
         shutil.copyfile(source, target)
         return target
 
-    def incomplete(directory, output, cancel):
+    def incomplete(directory, output, cancel, *, bitrate):
         output.write_bytes(b"incomplete")
         return 0.1
 
@@ -230,5 +235,74 @@ def test_incomplete_encode_is_not_delivered(client, monkeypatch, tmp_path):
     render = client.post("/api/render", json={"analysis_id": job["id"], "track_ids": [analysis["tracks"][0]["id"]], "title": "test"}, headers=HEADERS).json()
     assert wait_job(client, render["id"])["status"] == "error"
     assert not any(c.OUTPUT_DIR.iterdir())
-    assert not any(c.DATA_DIR.iterdir())
+    assert not any(path.is_dir() for path in c.DATA_DIR.iterdir())
     assert client.get(f"/api/jobs/{render['id']}/download").status_code == 404
+
+
+def test_metadata_reused_only_within_session_preserves_duplicates(client, monkeypatch):
+    calls = []
+
+    def inspect(url, cancel):
+        calls.append(url)
+        return {"url": url, "title": url[-11:], "duration": 100 if url == VIDEO_A else 200}
+
+    monkeypatch.setattr(audio, "inspect_video", inspect)
+    first = client.post("/api/analyze", json={"links": VIDEO_A}, headers=HEADERS).json()
+    assert wait_job(client, first["id"])["expected_duration"] == 100
+    second = client.post("/api/analyze", json={"links": f"{VIDEO_B}\nhttps://youtu.be/aaaaaaaaaaa\n{VIDEO_A}"}, headers=HEADERS).json()
+    result = wait_job(client, second["id"])
+    assert calls == [VIDEO_A, VIDEO_B]
+    assert [track["url"] for track in result["tracks"]] == [VIDEO_B, VIDEO_A, VIDEO_A]
+    assert len({track["id"] for track in result["tracks"]}) == 3
+    assert result["expected_duration"] == 400
+    assert not any(c.DATA_DIR.iterdir())
+    monkeypatch.setattr(app, "jobs", {})
+    restarted = client.post("/api/analyze", json={"links": VIDEO_A}, headers=HEADERS).json()
+    assert wait_job(client, restarted["id"])["expected_duration"] == 100
+    assert calls == [VIDEO_A, VIDEO_B, VIDEO_A]
+    assert not any(c.DATA_DIR.iterdir())
+
+
+def test_metadata_parallel_completion_preserves_order_and_queries_duplicates_once(client, monkeypatch):
+    rendezvous = threading.Barrier(2, timeout=3)
+    calls = []
+
+    def inspect(url, cancel):
+        calls.append(url)
+        rendezvous.wait()
+        return {"url": url, "title": "Track", "duration": 60}
+
+    monkeypatch.setattr(audio, "inspect_video", inspect)
+    job = client.post("/api/analyze", json={"links": f"{VIDEO_A}\n{VIDEO_B}\n{VIDEO_A}"}, headers=HEADERS).json()
+    result = wait_job(client, job["id"])
+    assert result["status"] == "done"
+    assert sorted(calls) == [VIDEO_A, VIDEO_B]
+    assert [track["url"] for track in result["tracks"]] == [VIDEO_A, VIDEO_B, VIDEO_A]
+    assert result["expected_duration"] == 180
+
+
+def test_metadata_failed_link_retries_without_refetching_successes(client, monkeypatch):
+    calls = []
+
+    def inspect(url, cancel):
+        calls.append(url)
+        if url == VIDEO_B and calls.count(VIDEO_B) == 1:
+            raise audio.TaskError("Temporary failure")
+        return {"url": url, "title": "Track", "duration": 60}
+
+    monkeypatch.setattr(audio, "inspect_video", inspect)
+    job = client.post("/api/analyze", json={"links": f"{VIDEO_A}\n{VIDEO_B}"}, headers=HEADERS).json()
+    assert wait_job(client, job["id"])["tracks"][1]["error"]
+    retry = client.post("/api/analyze", json={"links": f"{VIDEO_A}\n{VIDEO_B}"}, headers=HEADERS).json()
+    result = wait_job(client, retry["id"])
+    assert calls.count(VIDEO_A) == 1
+    assert calls.count(VIDEO_B) == 2
+    assert not any(track.get("error") or track["pending"] for track in result["tracks"])
+    assert result["expected_duration"] == 120
+
+
+@pytest.mark.parametrize("bitrate", ["500k", "0k", "320k -ar 1", 320, None])
+def test_unsupported_bitrate_rejected(bitrate):
+    with pytest.raises(ValidationError) as error:
+        app.RenderInput(analysis_id="0" * 32, track_ids=["1" * 32], title="test", bitrate=bitrate)
+    assert error.value.errors()[0]["loc"] == ("bitrate",)

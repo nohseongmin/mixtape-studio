@@ -1,0 +1,14 @@
+{
+  "ffmpeg": {
+    "url": "https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-11-03-12-50/ffmpeg-n9.0.2-45-g1e65c6cd5d-win64-lgpl-shared-9.0.zip",
+    "sha256": "be035a7f1763fdab8430949bed65eab94dc91cbdea1d03607e4ac5403e73ce76"
+  },
+  "yt-dlp": {
+    "url": "https://github.com/yt-dlp/yt-dlp/releases/download/2026.10.26/yt-dlp.exe",
+    "sha256": "f5389d3698ecde4ef06f4e6b1ce0294fe9ac1396228c8990b8d3416d6d177a7d"
+  },
+  "node": {
+    "url": "https://nodejs.org/dist/v26.13.0/node-v26.13.0-win-x64.zip",
+    "sha256": "dcc60d59a0746999f99064a01c020445d54d84228c691cdbf25b49ac3b59150a"
+  }
+}

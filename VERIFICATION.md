@@ -1,18 +1,50 @@
-# 검증 결과
+# Verification
 
-검증일: 2026-11-04 (한국 시간)
+## Automated coverage
 
-- 자동 테스트: 19개 통과. 실제 FFmpeg 인코딩, 서로 다른 샘플레이트의 곡 결합, 순서, 내부 무음 보존, 경계 무음 제거, 한글 ID3v2.3 태그, 800×800 JPEG 표지, HTTP 다운로드/Range, URL·Origin·Host·요청 크기 검증, 취소·작업 중복 거부, 불완전한 인코딩 결과 차단·정리 포함.
-- 301개 링크의 메타데이터 작업과 20시간 이상의 길이 합산을 대체 데이터로 검증. 301개 실제 유튜브 다운로드의 부하 검증은 수행하지 않음.
-- 브라우저: 링크·태그 입력, 이미지 업로드, 확대·가로 위치 조절, 정사각형 표지 적용, 목록/예상시간 표시, 새로고침 초안 복구, 실제 MP3 제작 완료 표시 확인. 콘솔 오류·경고 0개.
-- 네트워크: [Blender의 Big Buck Bunny](https://www.youtube.com/watch?v=YE7VzlLtp-4)를 2회 입력해 실제 오디오 다운로드부터 최종 MP3 생성까지 성공. 원본 메타데이터 합계 19분 54초, 실제 결과 약 19분 53초, 약 27.4MiB. 메타데이터는 정수 초이고 실제 오디오 스트림 길이는 다를 수 있음.
-- 이미지 라이브러리 취약점 검사 후 Pillow를 13.0.0으로 변경. 최종 pip-audit 결과 알려진 취약점 0개. 전체 설치 버전은 constraints.txt에 고정.
-- 실제 휴대용 MP3 기기의 한글 태그·표지·긴 파일 탐색 호환성은 미검증.
+Run `.venv\Scripts\python.exe -m pytest -q` on Windows with FFmpeg, FFprobe,
+Node.js, and WebView2 available. Tests do not need a live YouTube connection.
 
-## 검증 중 수정한 문제
+- Canonical links, rejected invalid hosts/credentials/ports/IDs, and 301 videos.
+- Concurrent metadata lookup, session-only reuse, and retries of failed entries.
+- Actual WebView2: paste, auto lookup, edit, reorder, remove, retry, duration,
+  bitrate submission, crop editor, and blank state after reload.
+- Legacy saved links, tags, and covers are discarded; quality resets to 192 kbps.
+- Generated audio: edge trimming, preserved internal pauses, track order, Unicode
+  ID3v2.3 tags, and 800 × 800 embedded covers.
+- Real encoding at 128, 192, 256, and 320 kbps, with duration validation.
+- Bad bitrates, malformed covers, restricted/oversized requests, unavailable videos,
+  all-silent audio, cancellation, and truncated output.
+- Desktop lifetime: idle close, active download, active conversion, forced exit,
+  closed server sockets, and terminated descendant processes.
+- Startup readiness and visible loading errors; separate bundled download worker.
 
-- FLAC 파일을 concat demuxer로 합칠 때 FFmpeg가 블록 크기 오류를 출력하면서 일부 오디오를 누락하고 성공 코드로 종료하는 사례 확인. 표준 PCM WAV/RF64 중간 파일로 변경하고 FFmpeg에 `-xerror` 적용. 최종 길이가 무음 제거된 곡 합계와 0.15초 이상 다르면 실패 처리하도록 추가.
-- 새로고침 시 마지막 완료된 분석 작업이 사용자가 정한 곡 순서를 덮어쓰던 흐름 수정.
-- 새 표지 선택 후 편집을 취소했을 때 기존 편집 원본이 바뀌던 상태 관리 수정.
+## Release checks
 
-테스트 환경에서 Starlette가 httpx 테스트 클라이언트의 향후 전환 안내 경고 1개를 출력함. 실제 앱의 브라우저 실행에는 해당하지 않음.
+Built with 64-bit Python 3.12 and PyInstaller 6.22.3. Tool downloads are checked
+against `build-tools.json`. Releases include a checksum and license notices.
+
+- 2026-11-04: **43 tests passed**, using the exact FFmpeg/FFprobe/Node tools bundled
+  in the release. JavaScript syntax and Git whitespace checks passed.
+- The one-file EXE started with `PATH` reduced to Windows System32 and no Python
+  environment variables or external media-tool overrides. Its native English
+  window loaded successfully and reported no missing tools.
+- Closing the real packaged window terminated both Mixtape processes and all six
+  WebView2 descendants. Its server port was no longer listening.
+- A live lookup of the Blender Foundation's Big Buck Bunny reported 635 seconds.
+  The packaged app downloaded its audio, trimmed the edges, and produced a
+  634.044-second, 320,000-bit/s MP3 with Unicode tags and an 800 × 800 JPEG cover.
+  The generated file was about 25.4 MB. This sample is test data and is not shipped.
+- Test media: [Big Buck Bunny](https://peach.blender.org/about/), Blender Foundation,
+  CC BY 3.0; audio extracted and edge silence trimmed for verification.
+
+## Limitations
+
+- Mocked metadata tests cannot predict YouTube availability, rate limits, or
+  future extractor changes.
+- Higher bitrate cannot improve the original source audio.
+- Very quiet boundary audio may meet the silence threshold.
+- Windows x64 is supported. Other systems, Windows ARM, and a clean PC without
+  WebView2 are not covered.
+- Starlette currently emits a TestClient/httpx deprecation warning; checks pass.
+- The executable is unsigned; no signing certificate is included.

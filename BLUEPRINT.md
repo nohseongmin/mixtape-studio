@@ -1,50 +1,53 @@
-# Mixtape 블루프린트
+# Architecture
 
-## 한 줄 정의
-휴대용 MP3 플레이어로 듣는 개인 사용자가 유튜브 영상 여러 개를 무음 없이 이어 붙이고 커버와 태그를 넣는 로컬 앱.
+Mixtape is a Windows desktop app with a local HTML/CSS/JavaScript interface.
+It combines individual YouTube video audio tracks into one tagged MP3.
 
-## 가정
-- Windows PC에서 실행하고 브라우저로 조작한다. 공개 서버와 계정은 필요하지 않다.
-- 현재 허용된 작업공간 `C:\Claude Projects\mixtape-studio`에 새 프로젝트를 만든다.
-- 곡 사이 무음 제거는 각 소스의 시작·끝에만 적용한다. 곡 중간의 음악적 쉼은 유지한다.
-- 영상 개수나 합계 재생시간을 300개·1시간으로 자르지 않는다. 입력 텍스트 200,000자 안전 한도와 실제 디스크 공간이 제한이다.
-- 표지는 선택사항이며 브라우저가 읽을 수 있는 이미지(JPEG, PNG, WebP, GIF 등의 첫 프레임)를 정사각형 JPEG 800px로 저장한다. HEIC/RAW 등 미지원 포맷은 변환이 필요하다.
-- MP3는 192kbps, 44.1kHz 스테레오, ID3v2.3으로 저장한다. 기기별 표지 표시 호환성은 실제 플레이어에서 확인한다.
+| File | Responsibility |
+| --- | --- |
+| `Mixtape.pyw` | Console-free entry point, rotating log, visible startup errors |
+| `launch.py` | Native WebView2 window, loopback server, instance mutex, process lifetime |
+| `app.py` | Validated API, in-memory jobs, concurrent lookups, sequential rendering |
+| `audio.py` | Link validation, child processes, extraction, trimming, encoding, ID3 |
+| `config.py` | Defaults, limits, bundle paths, environment overrides |
+| `static/` | English UI, link rows, duration estimate, ordering, crop editor |
+| `build.py`, `Mixtape.spec`, `build-tools.json` | Checksum-pinned tools and one-file packaging |
 
-## 시장성 & 경쟁
-- [yt-dlp](https://github.com/yt-dlp/yt-dlp): 다운로드 처리에 적합하지만 명령줄 도구이고 이 앱의 편집 흐름은 제공하지 않는다. 다운로드 엔진으로 직접 사용.
-- [Mp3tag](https://www.mp3tag.de/en/): 태그·표지 편집에 강점. 여러 유튜브 소스의 다운로드·경계 무음 정리·단일 파일 제작 흐름은 별도로 구성해야 한다.
-- [LosslessCut](https://github.com/mifi/lossless-cut): 자르기·무음 감지 등 편집 기능을 제공한다. 이번 앱은 링크 입력부터 태그가 포함된 MP3까지 한 화면으로 좁힌다.
-- 수요는 이번 개인 사용 사례로 확인했다. 상업 시장 규모와 결제 의향은 검증하지 않았다.
+## Lifetime
 
-## BM 매칭
-현재 개인용 무료 도구. 향후 배포한다면 유료 데스크톱 라이선스를 선택한다. 반복 작업 절감과 설치·업데이트 편의성이 지불 이유이며, 안정성 및 실제 결제 의향을 검증한 뒤 과금한다. MVP에 결제·광고·구독은 넣지 않는다.
+The window owns the local server and child processes through a Windows Job Object
+with `KILL_ON_JOB_CLOSE`. Normal close requests cancellation and server shutdown.
+Closing the job handle also terminates remaining descendants. The window stays
+hidden until its document is loaded and the app script is present, avoiding an
+empty white window. Duplicate launches focus the existing instance.
 
-## 보안 체크리스트
-- 루프백 바인딩, Host 및 Origin 검사, cross-site 차단, 쓰기 요청에 전용 헤더 적용.
-- 영상 URL은 유튜브 호스트·영상 ID를 검증한 뒤 정규화. 임의 URL/로컬 파일/명령 실행 입력 불허.
-- subprocess 인자 배열, shell 미사용, 사용자 제목을 디스크 경로에 사용하지 않음.
-- 요청 크기·태그 길이·이미지 크기 제한, 서버에서 정사각형 JPEG 재검증·재인코딩.
-- 동적 화면은 textContent 및 DOM API 사용. CSP 및 프레임 차단.
-- 단일 작업만 실행, 취소·오류를 표시, 실패한 곡을 조용히 건너뛰지 않음.
-- 임시 오디오는 완료/실패/취소 시 삭제. 최종 결과와 입력 초안은 사용자 PC에 보관.
-- 쿠키·로그인·API 키를 수집하지 않음. 의존성 버전 고정 및 취약점 검사.
+Frozen resources live in PyInstaller's extraction directory. Working files and
+MP3s live beside the executable, or in explicitly configured directories. The
+download worker is a separate bundled yt-dlp executable: a frozen application
+must not invoke its own executable as though it were a Python interpreter.
 
-## 기술스택
-Python / FastAPI / yt-dlp / FFmpeg / Mutagen / Pillow + 빌드 없는 HTML·CSS·JavaScript. 메타데이터 조회와 변환은 백그라운드 작업으로 처리하며, 상태는 폴링한다. PCM WAV/RF64 임시 파일로 형식을 통일하고 최종 MP3는 한 번 인코딩한다. 임시 저장 공간은 오디오 1시간당 약 606MiB가 필요하다.
+## Data flow
 
-## 활용 스킬
-- scout — 공식 도구와 기존 유사 제품을 확인하고 다운로드/인코딩 기능을 재구현하지 않는다.
-- idea-to-mvp — 범위·가정·구현·검증·실행 안내까지 완주한다.
-- ponytail — DB·계정·프레임워크 빌드를 추가하지 않고 필요한 로컬 기능만 구현한다.
-- sites — 로컬 앱의 화면 구현 및 로컬 브라우저 검증 절차를 적용한다. 게시하지 않는다.
+1. Typing pauses for 700 ms before lookup. Multi-link pastes create separate rows.
+2. Supported links are canonicalized. Successful results from earlier jobs in the
+   same process are reused. Up to four distinct new videos are checked at once.
+3. Selected audio is downloaded and decoded to trimmed 44.1 kHz stereo PCM. Only
+   silence touching the start or end is removed. Internal rests remain intact.
+4. PCM tracks are concatenated and encoded once at the chosen bitrate. The output
+   duration is checked against the trimmed track total.
+5. ID3v2.3 tags and optional square JPEG cover art are written. The MP3 moves to
+   `outputs`, and temporary job files are cleaned up.
 
-## MVP 범위
-IN: 여러 개별 영상 URL, 제목·길이 확인, 순서 변경/삭제, 원본 합계 예상 길이, 경계 무음 제거, 커버 드래그/확대 자르기, 제목·가수·앨범 태그, 진행률·취소·오류 표시, 단일 MP3 저장·미리듣기, 브라우저 초안 복구.
+## Boundaries
 
-OUT: 1시간 자동 선택, 크로스페이드, 음량 자동 정규화, 유튜브 재생목록 URL 자동 확장, 로그인 필요 영상, 공개 웹 호스팅, 설치 프로그램/서명된 EXE.
+- No persistent playlist, cover, or video-metadata database.
+- No fixed duration or 300-track ceiling; request and disk limits still apply.
+- One active analysis or render job per process.
+- No playlist expansion, account cookies, DRM handling, crossfade, or normalization.
+- Localhost only, with host/origin checks, custom request header, CSP, request
+  limits, strict schemas, and validated subprocess arguments.
+- No shell commands for media tools. Streams are redirected; consoles are hidden.
 
-## 로드맵
-1. 실제 사용자 MP3 플레이어에서 한글 태그·표지·긴 파일 탐색을 확인한다.
-2. 필요할 때 사용자 소유 로컬 오디오 입력과 실패한 다운로드 재사용을 추가한다.
-3. 배포 수요가 생기면 설치 프로그램과 검증된 업데이트 경로를 마련한다.
+Defaults live in `config.py`. Dependencies and external build tools are pinned.
+Tests use generated audio and deterministic metadata, with actual WebView2 for UI
+behavior and actual FFmpeg for the audio pipeline.
