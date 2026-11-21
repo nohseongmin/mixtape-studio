@@ -2,16 +2,36 @@
 
 ## Automated coverage
 
-Run `.venv\Scripts\python.exe -m pytest -q` on Windows with FFmpeg, FFprobe,
-Node.js, and WebView2 available. Tests do not need a live YouTube connection.
+Use 64-bit Python 3.12 on Windows with FFmpeg, FFprobe, Node.js, and WebView2
+available. From the repository root, create the verification environment and
+install the pinned development requirements before running the full suite:
+
+```powershell
+python -m venv --without-pip .venv
+python -m pip --python .venv\Scripts\python.exe install -r requirements-dev.txt
+.venv\Scripts\python.exe -m pytest -q
+```
+
+`requirements-dev.txt` includes `requirements.txt`, which already declares
+`pywin32`. A `ModuleNotFoundError: No module named 'win32api'` during desktop test
+collection means the test interpreter is missing that dependency. Install the
+requirements into the same environment used to run pytest; keep the desktop tests
+enabled. Tests do not need a live YouTube connection.
+
+`tests/test_pipeline.py::test_short_non_silent_audio_is_preserved` covers a
+0.1-second tone both alone and surrounded by silence. Before the fix, both cases
+raise `TaskError` because the remaining duration is below `SILENCE_SECONDS`
+(0.12 seconds). After the fix, both must retain the tone; only boundary silence
+is removed. The existing all-silent-track test must continue to raise `TaskError`.
 
 - Canonical links, rejected invalid hosts/credentials/ports/IDs, and 301 videos.
 - Concurrent metadata lookup, session-only reuse, and retries of failed entries.
 - Actual WebView2: paste, auto lookup, edit, reorder, remove, retry, duration,
   bitrate submission, crop editor, and blank state after reload.
 - Legacy saved links, tags, and covers are discarded; quality resets to 192 kbps.
-- Generated audio: edge trimming, preserved internal pauses, track order, Unicode
-  ID3v2.3 tags, and 800 × 800 embedded covers.
+- Generated audio: edge trimming, preserved internal pauses, 0.1-second tones
+  with and without boundary silence, track order, Unicode ID3v2.3 tags, and
+  800 × 800 embedded covers.
 - Real encoding at 128, 192, 256, and 320 kbps, with duration validation.
 - Bad bitrates, malformed covers, restricted/oversized requests, unavailable videos,
   all-silent audio, cancellation, and truncated output.

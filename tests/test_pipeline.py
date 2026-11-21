@@ -88,6 +88,15 @@ def test_edge_trimming_preserves_internal_pause(tmp_path):
     assert float(re.search(r"silence_end: ([\d.]+)", log)[1]) == pytest.approx(0.7, abs=0.001)
 
 
+@pytest.mark.parametrize("segments, removed", [([(0.1, 440)], 0),
+                                             ([(0.4, 0), (0.1, 440), (0.5, 0)], 0.9)])
+def test_short_non_silent_audio_is_preserved(tmp_path, segments, removed):
+    source = make_wave(tmp_path / "short.wav", segments)
+    result = audio.trim_audio(source, tmp_path / "trimmed.wav", threading.Event())
+    assert result["duration"] == pytest.approx(0.1, abs=0.001)
+    assert result["removed"] == pytest.approx(removed, abs=0.001)
+
+
 def test_all_silent_track_is_an_error(tmp_path):
     source = make_wave(tmp_path / "silence.wav", [(1, 0)])
     with pytest.raises(audio.TaskError, match="non-silent audio"):
