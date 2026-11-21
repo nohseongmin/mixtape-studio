@@ -168,7 +168,7 @@ def edge_bounds(log: str, duration: float) -> tuple[float, float]:
         left = min(duration, spans[0][1])
     if spans and spans[-1][1] >= duration - c.EDGE_TOLERANCE:
         right = max(0.0, spans[-1][0])
-    if right - left <= c.SILENCE_SECONDS:
+    if right <= left:
         raise TaskError("No non-silent audio was found. Remove this video and try again.")
     return left, right
 
