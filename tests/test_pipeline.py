@@ -172,6 +172,33 @@ def test_end_to_end_real_encoding_tags_cover_order_and_cleanup(client, monkeypat
     assert ranged.status_code == 206
 
 
+def test_short_tone_survives_render_and_download(client, monkeypatch, tmp_path):
+    tone_seconds, frequency = 0.1, 440
+    source = make_wave(tmp_path / "short.wav", [(0.4, 0), (tone_seconds, frequency), (0.5, 0)])
+    monkeypatch.setattr(audio, "inspect_video", lambda url, cancel: {"url": url, "title": "Short tone", "duration": 1})
+    monkeypatch.setattr(audio, "download_audio", lambda url, directory, cancel: source)
+
+    lookup = client.post("/api/analyze", json={"links": VIDEO_A}, headers=HEADERS)
+    analysis = wait_job(client, lookup.json()["id"])
+    render = client.post("/api/render", headers=HEADERS, json={
+        "analysis_id": analysis["id"], "track_ids": [analysis["tracks"][0]["id"]], "title": "Short tone",
+    })
+    result = wait_job(client, render.json()["id"])
+    assert result["status"] == "done", result["message"]
+    response = client.get(f"/api/jobs/{result['id']}/download")
+    assert response.status_code == 200
+    mp3 = tmp_path / "download.mp3"
+    mp3.write_bytes(response.content)
+    decoded = tmp_path / "decoded.wav"
+    audio.run_process([c.FFMPEG, "-v", "error", "-i", str(mp3), "-ac", "1", str(decoded)], threading.Event())
+    with wave.open(str(decoded), "rb") as stream:
+        rate = stream.getframerate()
+        samples = array.array("h", stream.readframes(stream.getnframes()))
+    assert len(samples) / rate == pytest.approx(tone_seconds, abs=0.005)
+    crossings = sum(left <= 0 < right for left, right in zip(samples, samples[1:]))
+    assert crossings / tone_seconds == pytest.approx(frequency, abs=20)
+
+
 def test_301_tracks_and_more_than_one_hour_are_not_truncated(client, monkeypatch):
     monkeypatch.setattr(audio, "inspect_video", lambda url, cancel: {"url": url, "title": "Track", "duration": 240})
     job = client.post("/api/analyze", json={"links": "\n".join([VIDEO_A] * 301)}, headers=HEADERS).json()
