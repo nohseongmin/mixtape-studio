@@ -95,7 +95,7 @@ function renderTracks() {
       retry.title = "Retry";
       retry.setAttribute("aria-label", `Retry track ${index + 1}`);
       retry.addEventListener("click", () => {
-        state.tracks[index] = { input: track.input };
+        state.tracks[index] = { input: input.value };
         renderTracks(); scheduleAnalysis();
       });
       actions.append(retry);
