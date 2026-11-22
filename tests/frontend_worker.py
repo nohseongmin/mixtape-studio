@@ -19,12 +19,12 @@ c.DATA_DIR = directory / "data"
 c.OUTPUT_DIR = directory / "outputs"
 c.PORT = 0
 calls = []
-videos = [f"https://www.youtube.com/watch?v={letter * 11}" for letter in "abcd"]
+videos = [f"https://www.youtube.com/watch?v={letter * 11}" for letter in "abcdef"]
 
 
 def inspect(url, cancel):
     calls.append(url)
-    if url == videos[3] and calls.count(url) == 1:
+    if url in videos[3:5] and calls.count(url) == 1:
         raise audio.TaskError("Please try again")
     return {"url": url, "title": f"Test track {videos.index(url) + 1}", "duration": 60 * (videos.index(url) + 1)}
 
@@ -85,6 +85,23 @@ def exercise(window):
         analyzed()
         assert window.evaluate_js("!state.tracks[2].error && !document.getElementById('render').disabled")
         assert calls.count(videos[3]) == 2
+        window.evaluate_js("document.getElementById('add-link').click()")
+        enter(3, videos[4])
+        analyzed()
+        assert window.evaluate_js("!!state.tracks[3].error")
+        # Edit and retry in one JS turn, before the debounce can redraw the failed row.
+        window.evaluate_js(f"""(() => {{
+            const input = document.querySelectorAll('.track-link')[3];
+            input.value = {json.dumps(videos[5])};
+            input.dispatchEvent(new Event('input', {{bubbles: true}}));
+            document.querySelector('[aria-label="Retry track 4"]').click();
+        }})()""")
+        assert window.evaluate_js("state.tracks[3].input") == videos[5]
+        assert window.evaluate_js("document.querySelectorAll('.track-link')[3].value") == videos[5]
+        analyzed()
+        assert window.evaluate_js("document.querySelectorAll('.track-link')[3].value") == videos[5]
+        assert window.evaluate_js("!state.tracks[3].error && state.tracks[3].title === 'Test track 6' && state.tracks[3].duration === 360")
+        assert calls.count(videos[4]) == calls.count(videos[5]) == 1
         assert window.evaluate_js("document.getElementById('bitrate').value === '192k' && document.getElementById('bitrate').options.length === 4")
         window.evaluate_js("""(() => {
             window.originalFetch = window.fetch;
